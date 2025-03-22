@@ -1,0 +1,246 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Voice Recognition Assistant</title>
+    <link href="https://fonts.googleapis.com/css2?family=Roboto:wght@400;700&display=swap" rel="stylesheet">
+    <style>
+        #output .fade-in {
+            animation: fadeIn 2s ease-in-out;
+        }
+
+        @keyframes fadeIn {
+            from {
+                opacity: 0;
+            }
+
+            to {
+                opacity: 1;
+            }
+        }
+
+        .waiting-icon img {
+            width: 100px;
+            height: 100px;
+        }
+
+        body {
+            font-family: 'Roboto', sans-serif;
+            margin: 0;
+            padding: 0;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            min-height: 100vh;
+            background: linear-gradient(135deg, #f5f7fa, #c3cfe2);
+        }
+
+        .container {
+            max-width: 600px;
+            width: 100%;
+            padding: 30px;
+            background-color: #fff;
+            border-radius: 15px;
+            box-shadow: 0 4px 15px rgba(0, 0, 0, 0.1);
+            text-align: center;
+            background-color: rgba(249, 249, 249, 255);
+        }
+
+        h1 {
+            margin-bottom: 20px;
+            color: #333;
+            font-size: 2.5em;
+        }
+
+        p {
+            margin-bottom: 20px;
+            color: #666;
+            font-size: 1.1em;
+        }
+
+        button {
+            padding: 15px 30px;
+            border: none;
+            background-color: #007bff;
+            color: #fff;
+            border-radius: 50px;
+            cursor: pointer;
+            font-size: 1.1em;
+            transition: background-color 0.3s ease, transform 0.3s ease;
+        }
+
+        button:hover {
+            background-color: #0056b3;
+            transform: scale(1.05);
+        }
+
+        #output {
+            margin-top: 20px;
+            padding: 15px;
+            border: 1px solid #ccc;
+            border-radius: 10px;
+            background-color: #f9f9f9;
+            color: #333;
+            min-height: 50px;
+            font-size: 1.1em;
+        }
+
+        .listening-icon {
+            display: none;
+            position: relative;
+            margin: 20px auto;
+            width: 60px;
+            height: 60px;
+        }
+
+        .listening-icon div {
+            position: absolute;
+            border: 4px solid #007bff;
+            opacity: 1;
+            border-radius: 50%;
+            animation: ripple 1.5s infinite;
+        }
+
+        .listening-icon div:nth-child(2) {
+            animation-delay: -0.5s;
+        }
+
+        .listening-icon div:nth-child(3) {
+            animation-delay: -1s;
+        }
+
+        @keyframes ripple {
+            0% {
+                top: 28px;
+                left: 28px;
+                width: 0;
+                height: 0;
+                opacity: 1;
+            }
+
+            100% {
+                top: -1px;
+                left: -1px;
+                width: 58px;
+                height: 58px;
+                opacity: 0;
+            }
+        }
+    </style>
+</head>
+
+<body>
+    <div class="container">
+        <h1>Voice Recognition</h1>
+        <p>Click the button and speak your command:</p>
+        <button id="startBtn">Start Listening</button>
+        <div class="listening-icon" id="listeningIcon">
+            <div></div>
+            <div></div>
+            <div></div>
+        </div>
+        <div class="waiting-icon" id="waitingIcon" style="display: none;">
+            <img src="static/images/waiting.gif" alt="Waiting...">
+        </div>
+        <div id="output"></div>
+    </div>
+
+
+    <script src="https://code.jquery.com/jquery-3.6.0.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/remarkable/dist/remarkable.min.js"></script>
+    <script>
+
+        $(document).ready(function () {
+            const recognition = new webkitSpeechRecognition() || new SpeechRecognition();
+            recognition.lang = 'en-US';
+            recognition.continuous = false;
+            recognition.interimResults = false;
+
+            const startListening = () => {
+                $('#output').text('Listening...');
+                $('#listeningIcon').show();
+                $('#startBtn').hide();
+                recognition.start();
+            };
+
+            $('#startBtn').click(async function () {
+                // start listening
+                $('#output').text('');
+                $.ajax({
+                    url: '/stop-talking',
+                    type: 'POST',
+                    contentType: 'application/json',
+                    success: function (response) {
+                        console.log(response);
+                    },
+                    error: function (xhr, status, error) {
+                        console.error(xhr.responseText);
+                    }
+                });
+                try {
+                    const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+                    stream.getTracks().forEach(track => track.stop());
+                    startListening();
+                } catch (error) {
+                    console.error('Error accessing microphone:', error);
+                    alert('Error accessing microphone. Please allow microphone access to use voice recognition.');
+                }
+            });
+
+            recognition.onresult = function (event) {
+                const transcript = event.results[0][0].transcript.trim();
+                $('#output').text('Recognized Command: ' + transcript);
+                $('#listeningIcon').hide();
+                $('#startBtn').show();
+
+                // 1. Show the waiting icon
+                $('#waitingIcon').show();
+
+                $.ajax({
+                    url: '/get-information',
+                    type: 'POST',
+                    contentType: 'application/json',
+                    data: JSON.stringify({ query: transcript }),
+                    success: function (response) {
+                        if (response.language) {
+                            recognition.lang = response.language;
+                            // You might want to provide feedback to the user
+                            $('#output').text('Switching to ' + response.language);
+
+                            // Restart the recognition (if needed)
+                            recognition.stop();
+                            startListening();
+                        }
+
+                        if (response.status === 'success') {
+                            // Update the output div with Mistral's response
+                            $('#output').text('');
+                            if (response.response && response.response.trim() !== '') {
+                                const md = new remarkable.Remarkable();
+                                const htmlOutput = md.render(response.response);
+                                $('#output').html(htmlOutput);
+                                $('#output *').addClass('fade-in');
+                            }
+                            $('#waitingIcon').hide();
+                        }
+
+                    },
+                    error: function (xhr, status, error) {
+                        console.error(xhr.responseText);
+                    }
+                });
+            };
+
+            recognition.onerror = function (event) {
+                console.error('Speech recognition error:', event.error);
+                alert('Speech recognition error. Please try again or allow microphone access.');
+                $('#listeningIcon').hide();
+                $('#startBtn').show();
+            };
+        });
+    </script>
+</body>
+
+</html>
